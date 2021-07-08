@@ -1,0 +1,506 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+pacman::p_load(
+  rvest,
+  tidyverse,
+  patchwork,
+  ggthemes
+)
+```
+
+```{r}
+# select the years to loop through
+lego_years <- 2015:2021
+
+# Create empty table
+lego_complete <- NULL
+
+for (years in lego_years) {
+  #years <- "2019" # for testing
+
+  html_lego <- read_html(paste0("https://brickset.com/sets/year-", years, "/page-1"))
+
+  results_max <- html_lego %>%
+    html_nodes(".results") %>%
+    html_text()
+
+  # Create for loop values
+  results_max <- str_remove(results_max, "1 to 25 of ")
+  results_max <- ceiling(as.numeric(str_remove(results_max, " matches")) / 25)
+  results <- 1:results_max
+
+  for (i in results) {
+    #i <- 1 # for testing
+
+    html <- read_html(paste0("https://brickset.com/sets/year-", years, "/page-", i))
+
+    # lego price ---------------------------------------------------------------
+    print(paste0("lego price for loop: ", i))
+    lego_price <-
+      html %>%
+      html_nodes(".rating+ .col dl") 
+
+    ppp <- NULL
+
+    for (j in 1:length(lego_price)) {
+      ppp[j] <- ifelse(
+        str_detect(html_text(lego_price[j]), "More"),
+        str_remove_all(str_extract(html_text(lego_price[j]), "PPP\\s*(.*?)\\s*c"), "[:alpha:]"),
+        NA
+      )
+    }
+
+    ppp <- stringi::stri_trim(ppp)
+    ppp <- gsub("[\r\n]", ", ", ppp)
+    
+    lego_price_ppp <- as_tibble(ppp) %>%
+      rename(
+        price_ppp = 1
+      )
+    
+    rrp <- NULL
+    
+    for (j in 1:length(lego_price)) {
+      rrp[j] <- ifelse(
+        str_detect(html_text(lego_price[j]), "\\$|\u20AC"),
+        str_extract(html_text(lego_price[j]), "(?<=RRP|,).*(?<=\u20AC|\\|)"),
+        NA
+      )
+    }
+
+    lego_price_rrp <- as_tibble(rrp) %>%
+      rename(
+        price_rrp = 1
+      )
+
+    # lego name ----------------------------------------------------------------
+    print(paste0("lego name for loop: ", i))
+    lego_name <- html %>%
+      html_nodes("h1 a") %>%
+      html_text() %>%
+      as_tibble() %>%
+      #filter(str_detect(value, "[0-9]+:")) %>%
+      tidyr::separate(., value, c("id", "set_name"), "\\:", extra = "merge", fill = "left") %>%
+      select(id, set_name)
+
+    # lego pieces --------------------------------------------------------------
+    print(paste0("lego pieces for loop: ", i))
+    lego_pieces <-
+      html %>%
+      html_nodes(".rating+ .col dl")
+
+    cats <- NULL
+
+    for (j in 1:length(lego_pieces)) {
+      cats[j] <- ifelse(
+        str_detect(html_text(lego_pieces[j]), "Pieces"),
+        html_text(html_nodes(lego_pieces[j], "dd:nth-child(2) .plain")),
+        NA
+      )
+    }
+
+    cats <- stringi::stri_trim(cats)
+    cats <- gsub("[\r\n]", ", ", cats)
+
+    lego_pieces <- as_tibble(cats) %>%
+      rename(
+        pieces = 1
+      )
+    
+    # lego minifigs-------------------------------------------------------------
+    print(paste0("lego minifig for loop: ", i))
+    lego_minifig <-
+      html %>%
+      html_nodes(".rating+ .col dl")
+
+    cats <- NULL
+
+    for (j in 1:length(lego_minifig)) {
+      cats[j] <- ifelse(
+        str_detect(html_text(lego_minifig[j]), "Minifigs"),
+        html_text(html_nodes(lego_minifig[j], "dd:nth-child(4) .plain")),
+        NA
+      )
+    }
+
+    cats <- stringi::stri_trim(cats)
+    cats <- gsub("[\r\n]", ", ", cats)
+
+    lego_minifig <- as_tibble(cats) %>%
+      rename(
+        minifig = 1
+      )
+
+    # --------------------------------------------------------------------------
+    print(paste0("Add to lego complete: ", i))
+    lego <- bind_cols(
+      lego_name,
+      lego_price_ppp,
+      lego_price_rrp,
+      lego_pieces,
+      lego_minifig
+    ) %>%
+      mutate(
+        year = years
+      )
+
+    lego_complete <- rbind(
+      lego_complete,
+      lego
+    )
+  }
+}
+
+#lego_plot <- 
+lego_complete <- read.csv(paste0("/Users/", Sys.getenv("USERNAME"), "/Documents/lego.csv"))
+
+lego_complete_clean <- 
+  lego_complete %>%
+  #tidyr::separate(price_rrp, c("dollar", "euro"), ",", fill = "left") %>%
+  mutate(
+    price_ppp = as.numeric(price_ppp),
+    dollar = as.numeric(
+      str_trim(
+        str_extract(price_rrp, "(?<=\\$).*(?=\\,)"), 
+        side = "both")
+      ),
+    dollar = if_else(
+      is.na(dollar),
+      as.numeric(
+        str_trim(
+          str_extract(price_rrp, "(?<=\\$).*(?=\\|)"),
+          side = "both")
+        ),
+      dollar
+      ),
+    euro = as.numeric(
+      str_trim(
+        str_extract(price_rrp, "(?<=\\,).*(?=\200)"),
+        side = "both")
+    ),
+    pieces = as.numeric(pieces),
+    minifig = as.numeric(minifig)
+  )
+
+data.table::fwrite(lego_complete, paste0("/Users/", Sys.getenv("USERNAME"), "/Documents/lego.csv"))
+```
+
+```{r}
+lego_complete_clean
+```
+
+
+```{r}
+pacman::p_load(legocolors)
+
+as_tibble(lego_complete_clean) %>%
+  # filter(
+  #   !is.na(id),
+  #   !is.na(dollar)
+  # ) %>%
+  ggplot(aes(pieces, dollar, color = year)) +
+  geom_point(alpha = 0.5) +
+  # facet_wrap(
+  #   ~ year,
+  #   #scales = "free_y"
+  #   ) +
+  geom_smooth(
+    method = "lm",
+    se = TRUE,
+    linetype = "dashed",
+    color = "grey"
+    ) +
+  labs(
+    y = "Price",
+    x = "# of pieces",
+    title = "Price of lego vs. # of pieces, 2000 - 2020"
+    ) +
+  hrbrthemes::theme_tinyhand() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5)
+    ) +
+  scale_y_continuous(
+    labels = scales::dollar
+    )
+
+lego_complete_clean2 <- lego_complete_clean %>%
+  select(pieces, minifig, dollar) %>%
+  mutate(
+    minifig = if_else(is.na(minifig), 0, minifig)
+  ) %>%
+  drop_na(.)
+
+as_data_frame(lego_complete_clean) %>%
+  filter(price_ppp <= 1000) %>%
+  ggplot(aes(price_ppp, dollar)) +
+  geom_point()
+
+Hmisc::describe(lego_complete_clean)
+```
+
+```{r}
+# Find best model
+models <- tibble(
+  a1 = runif(250, -400, 2000),
+  a2 = runif(250, -0.075, 0.075)
+)
+
+ggplot(lego_complete_clean2, aes(pieces, dollar))+
+  geom_abline(aes(intercept = a1, slope = a2), data = models, alpha = 1/4) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+model1 <- function(a, data) {
+  #a2 slope, a1 intercept
+  a[1] + data$pieces * a[2]
+}
+
+measure_distance <- function(mod, data) {
+  diff <- data$dollar - model1(mod, data)
+  sqrt(mean(diff ^ 2))
+}
+
+lego_dist <- function(a1, a2) {
+  measure_distance(c(a1, a2), lego_complete_clean2)
+}
+
+lego_models <- models %>%
+  mutate(dist = purrr::map2_dbl(a1, a2, lego_dist))
+```
+
+
+```{r}
+# Best model
+## optim() way
+best <- optim(c(0, 0), measure_distance, data = lego_complete_clean2)
+best$par
+
+ggplot(lego_complete_clean2, aes(pieces, dollar)) + 
+  geom_point(size = 2, colour = "grey30") + 
+  geom_abline(intercept = best$par[1], slope = best$par[2])
+
+## lm() way
+lego_lm <- lm(dollar ~ pieces + minifig, data = lego_complete_clean2)
+summary(lego_lm)
+
+# estimated lego piece cost = $0.08
+round(coef(lego_lm), 2)
+
+# add pieces category
+# lego_complete_clean %>%
+#   select(id, set_name, pieces, dollar) %>%
+#   drop_na(.) %>%
+#   arrange(pieces) %>%
+#   mutate(
+#     piece_cat = cut(
+#       pieces, 
+#       seq(
+#         from = 0, 
+#         to = max(lego_complete_clean$pieces, na.rm = TRUE), 
+#         by = 10),
+#       labels = FALSE
+#       )
+#   )
+  
+```
+
+```{r}
+lego_lm <- lm(dollar ~ pieces, data = lego_complete_clean2)
+summary(lego_lm)
+```
+
+
+```{r}
+grid <- lego_complete_clean2 %>%
+  modelr::data_grid(pieces, minifig) %>%
+  modelr::add_predictions(lego_lm)
+
+grid
+
+ggplot(lego_complete_clean2, aes(pieces)) +
+  geom_point(aes(y = dollar)) +
+  geom_line(aes(y = pred), data = grid, colour = "red", size = 1)
+```
+## Residuals
+How far away are the predictions from the observed values?
+```{r}
+# mean of the errors is zero
+lego_complete_clean2 %>%
+  modelr::add_residuals(lego_lm) %>%
+  ggplot(aes(resid)) +
+  geom_freqpoly(binwidth = 0.5)
+
+# fBasics::jarqueberaTest(
+#   lego_complete_clean2 %>%
+#     modelr::add_residuals(lego_lm) %>%
+#     pull(resid)
+# )
+
+lego_complete_clean2 %>%
+  modelr::add_residuals(lego_lm) %>%
+  ggplot(aes(pieces, resid)) +
+  modelr::geom_ref_line(h = 0) +
+  geom_count(alpha = 0.25)
+```
+
+
+```{r}
+library(ggforce)
+
+lego_plot2 <-
+  distinct(lego_complete) %>%
+  mutate(
+    price = as.numeric(price),
+    pieces = as.numeric(pieces),
+    year = as.factor(year)
+  ) %>%
+  ggplot(aes(year, pieces, color = price)) +
+  geom_boxplot() +
+  geom_sina(alpha = 0.25) +
+  theme_tinyhand() +
+  labs(
+    title = "Lego year vs # of pieces per set",
+    x = "YEAR",
+    y = "PIECES"
+  ) +
+  theme(
+    legend.position = "none",
+    #panel.background = element_rect(fill = 'lightred'),
+    #plot.background=element_rect(fill = "lightyellow")
+  ) +
+  facet_zoom(ylim = c(0, 1000))
+```
+
+
+# lego mosaic
+```{r}
+library(brickr)
+
+mosaic <- png::readPNG('/Users/alexander.r.farach/Downloads/alex.png')  %>%
+  image_to_mosaic(img_size = 100)
+
+mosaic %>%
+  bricks_from_mosaic(highest_el = "dark") %>%
+  build_bricks()
+
+#From dput(round(rgl::par3d("userMatrix"),1)) after manual rotation
+custom_rotation <- structure(c(0.9, 0.3, -0.3, 0, -0.3, 0.9, -0.3,
+                               0, 0.2, 0.4, 0.9, 0, 0, 0, 0, 1), .Dim = c(4L, 4L))
+
+rgl::par3d(userMatrix = rgl::rotate3d(custom_rotation, 0, 0, pi/4 ,1))
+
+```
+
+# Data.gov scraper
+
+```{r}
+html_datagov_home <- read_html("https://catalog.data.gov/dataset?page=1")
+
+datagov_totalpages <- html_datagov_home %>%
+  html_nodes(".disabled+ li a") %>%
+  html_text() %>%
+  as.numeric(.)
+
+#datagov_totalpages_range <- 1:datagov_totalpages
+datagov_totalpages_range <- 1:100
+```
+
+
+```{r}
+datagov_complete <- NULL
+
+for (i in datagov_totalpages_range) {
+  html_datagov <- read_html(paste0("https://catalog.data.gov/dataset?page=", i))
+
+  datagov_name <-
+    html_datagov %>%
+    html_nodes(".dataset-heading a") %>%
+    html_text() %>%
+    as_tibble() %>%
+    rename(
+      name = 1
+    )
+
+  datagov_href <-
+    html_datagov %>%
+    html_nodes(".dataset-heading a") %>%
+    html_attr("href") %>%
+    as_tibble() %>%
+    transmute(
+      link = paste0("https://catalog.data.gov", value)
+    )
+
+  datagov_desc <-
+    html_datagov %>%
+    html_nodes(".notes div") %>%
+    html_text() %>%
+    as_tibble() %>%
+    rename(
+      desc = 1
+    )
+
+  datagov_org <-
+    html_datagov %>%
+    html_nodes(".dataset-organization") %>%
+    html_text() %>%
+    as_tibble() %>%
+    rename(
+      org = 1
+    )
+
+  datagov_orgtype <-
+    html_datagov %>%
+    html_nodes(".organization-type span") %>%
+    html_text() %>%
+    as_tibble() %>%
+    rename(
+      org_type = 1
+    )
+
+  datagov_resource <-
+    html_datagov %>%
+    html_nodes(".dataset-content")
+
+  cats <- NULL
+
+  for (j in 1:length(datagov_resource)) {
+    cats[j] <- ifelse(
+      length(html_text(html_nodes(datagov_resource[j], ".dataset-resources"))) == 0,
+      NA,
+      html_text(html_nodes(datagov_resource[j], ".dataset-resources"))
+    )
+  }
+
+  cats <- stringi::stri_trim(cats)
+  cats <- gsub("[\r\n]", ", ", cats)
+
+  datagov_resource <- as_tibble(cats) %>%
+    rename(
+      out_type = 1
+    )
+
+  datagov_loop <- bind_cols(
+    datagov_name,
+    datagov_href,
+    datagov_desc,
+    datagov_org,
+    datagov_orgtype,
+    datagov_resource
+  )
+  
+  datagov_complete <- bind_rows(
+    datagov_complete,
+    datagov_loop
+  )
+}
+    
+```
