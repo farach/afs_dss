@@ -1,0 +1,639 @@
+---
+title: "Joni Mitchell Sentiment Analysis"
+author: "Alex Farach"
+date: "7/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(
+  cache = TRUE,
+  cache.lazy = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  dpi = 180,
+  fig.width = 8,
+  fig.height = 5,
+  echo = TRUE
+  )
+
+pacman::p_load(
+  tidyverse,
+  tidytext,
+  #tidymodels,
+  SnowballC,
+  wordcloud,
+  reshape2#,
+  #here
+)
+
+# Create a ggplot2 theme
+theme_alex <- function() {
+  font <- "Arial"
+  theme_minimal()
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(
+      color = "#cbcbcb"
+    ),
+    panel.grid.major.x = element_blank(),
+    panel.background = element_blank(),
+    strip.background = element_rect(
+      fill = "white"
+    ),
+    strip.text = element_text(
+      hjust = 0,
+      color = "#460069",
+      size = 12
+    ),
+    axis.ticks = element_blank(),
+    plot.title = element_text(
+      family = font,
+      size = 20,
+      face = "bold",
+      color = "#460069"
+    ),
+    plot.subtitle = element_text(
+      family = font,
+      size = 14,
+      color = "#6a1c91",
+      hjust = 0.5
+    ),
+    plot.caption = element_text(
+      family = font,
+      size = 9,
+      hjust = 1,
+      color = "#460069"
+    ),
+    axis.title = element_text(
+      family = font,
+      size = 10,
+      color = "#460069"
+    ),
+    axis.text = element_text(
+      family = font,
+      size = 9,
+      color = "#460069"
+    ),
+    axis.text.x = element_text(
+      margin = margin(5, b = 10)
+    ),
+    legend.text.align = 0,
+    legend.background = element_blank(),
+    legend.title = element_blank(),
+    legend.key = element_blank(),
+    legend.text = element_text(
+      family = font,
+      size = 18,
+      color = "#4B636E"
+    )
+  )
+}
+```
+
+```{r}
+joni_lyrics_dates <- readRDS(url("https://github.com/farach/data/blob/master/joni_lyric_dates.RDS?raw=true", "rb"))
+joni_spotify <- readRDS(url("https://github.com/farach/data/blob/master/joni_spotify.rds?raw=true", "rb"))
+joni_genius_df <- readRDS(url("https://github.com/farach/data/blob/master/joni_genius_df.rds?raw=true", "rb"))
+```
+
+```{r}
+joni_lyrics_dates
+joni_spotify
+
+#joni_genius_df
+```
+
+Word proportion ----------------------------------------------------------------
+
+Good place to start: get a general sense of what most used words are in each
+album since the focus is on lyrics. Before I can get answers I need questions.
+
+```{r}
+joni_word_clean <- joni_lyrics_dates %>%
+  # we only want the lyrics that Joni wrote. Also remove live albums. Also remove songs that are mostly interludes (off her Mingus album)
+  filter(
+    !album_name %in% c(
+      "Shadows and Light", "Travelogue", "Both Sides Now",
+      "Shine [Standard Jewel - Parts Order Only]"
+    ),
+    !song_name %in% c(
+      "Coin In The Pocket (Rap)", "Funeral (Rap)",
+      "Happy Birthday 1975 (Rap)", "I's A Muggin' (Rap)",
+      "Lucky (Rap)"
+    ),
+    song_author == "by Joni Mitchell"
+  )
+
+joni_word_clean
+```
+
+```{r}
+joni_word_prop <- joni_word_clean %>%
+  # Turn everything into a character variable
+  mutate_if(is.factor, ~ as.character(.)) %>%
+  # Tokenize scraped lyrics
+  unnest_tokens(output = word, input = lyrics_scraped, token = "words",
+                to_lower = TRUE, strip_punct = TRUE
+                ) %>%
+  # Remove stop words
+  anti_join(get_stopwords()) %>%
+  # Format variables
+  mutate(
+    word = str_extract(word, "[a-z']+"),
+    album_name = paste0(album_name, " (", str_sub(album_release_date, 1, 4), ")")
+  ) %>%
+  # Get denominator
+  count(album_name, word) %>%
+  # Get numerator
+  group_by(album_name) %>%
+  mutate(proportion = round(n / sum(n), 4)) %>%
+  # Drop n column
+  select(-n) %>%
+  # Pivot data and fill 
+  pivot_wider(names_from = album_name, values_from = proportion, 
+              values_fill = 0) %>%
+  # Pivot back
+  pivot_longer(cols = 2:19, names_to = "album_name", values_to = "proportion")
+```
+
+```{r}
+joni_word_prop %>%
+  # Sort largest to smallest
+  arrange(desc(proportion)) %>%
+  # Round proportion
+  mutate(proportion = scales::percent(proportion, accuracy = 0.01)) %>%
+  # Get top 20
+  head(20) %>%
+  # Display table
+  kableExtra::kable(col.names = c("Word", "Album", "Proportion"), align = "c", 
+                    row.names = FALSE)
+```
+First thing I see is that Joni had a tendency to repeat words more often 
+throughout her albums in the second half of her musical career (mid-80’s through 
+the 00’s). Did she have a tendency to repeat words more in the second half of 
+her career?
+
+I want to get a better view of the top words in every album separately to see if 
+I can get a little closer to answering that question. I want to be able to see 
+how Joni’s use of repeating lyrics has changed over time.
+
+Top words per album ------------------------------------------------------------
+
+Step 1, arrange albums by year so the plot makes sense
+
+```{r}
+joni_facet_reorder <- joni_lyrics_dates %>%
+  arrange(as.numeric(str_sub(album_release_date, 1, 4))) %>%
+  transmute(
+    album_name = paste0(album_name, " (", str_sub(album_release_date, 1, 4), ")")
+  ) %>%
+  distinct() %>%
+  pull()
+
+joni_word_prop$album_name <- factor(
+  joni_word_prop$album_name, levels = joni_facet_reorder)
+```
+
+Step 2, create plot
+
+```{r}
+p_joni_top5 <- joni_word_prop %>% 
+  filter(
+    proportion != 0,
+    #album_name != "<NA>",
+    album_name != "NA (NA)",
+    #album_name != "Both Sides Now (2000)",
+  ) %>%
+  # Group by album
+  group_by(album_name) %>%
+  # Get the top 5 words with the highest proportion
+  top_n(5, proportion) %>%
+  # Ungroup
+  ungroup() %>%
+  # Sort by proportion
+  arrange(album_name, desc(proportion)) %>%
+  # Group by album again
+  group_by(album_name) %>%
+  # Just get the top5 words. The top_n() function will include duplicate
+  # duplicate proportions if the proportion is in the top 5
+  filter(row_number() <= 5) %>%
+  # Ungroup
+  ungroup() %>%
+  # Reorder top 5 words by proportion
+  mutate(word = reorder_within(as.factor(word), proportion, album_name))
+```
+
+```{r}
+p_joni_top5 %>%
+  # Begin to plot
+  ggplot(aes(word, proportion)) +
+  # The next 2 geoms make a lollipop graph which will make it easier to see
+  # differences than using a bar plot
+  geom_segment(aes(xend = word, yend = 0), linetype = "dashed") +
+  geom_point(color = "#460069") +
+  # Facet by album which we reordered above.
+  facet_wrap(~album_name,
+    scales = "free_y",
+    # Adding this labeller option which will create a new line in the
+    # facet labels if the length is longer than 20
+    labeller = label_wrap_gen(width = 17)
+  ) +
+  # Apply my theme
+  theme_alex() +
+  # The lollipop graph has lines going horizontally and so does theme_alex. I
+  # want to flip that so the grid lines are up and down. This will make it easier
+  # to see.
+  theme(
+    panel.grid.major.x = element_line(
+      color = "#cbcbcb"
+    ),
+    panel.grid.major.y = element_blank(),
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  # Coord flip
+  coord_flip() +
+  # Ned to add this so that the reordered words stay in the order we want them
+  scale_x_reordered() +
+  # Change the y axis to percent
+  scale_y_continuous(labels = scales::percent) +
+  # Add lables
+  labs(
+    x = NULL,
+    y = NULL,
+    title = "Top 5 words in Joni Mitchell albums",
+    caption = "source: JoniMitchell.com \nSpotify"
+  )
+```
+
+A couple of things pop out here to me. During the first half of her career she used the word “like” a lot. This makes me think that she was using a lot of analogies. In the second half of her career she is using less analogies (because “like” is no longer one of the most used words).
+
+“Dreamland” is an unexpected word to see making up the biggest proportion of all words.
+
+We can now see that she does in fact repeat words more often in the second half of her career. This makes sense I guess - she is using less analogies and just stating what things are, repeating it over and over instead of figuring out different ways to say it.
+
+Sentiment analysis -------------------------------------------------------------
+
+Before we begin we can look at the Spotify "Valence" score. This score describes
+"the musical positiveness conveyed by a track. Tracks with high valence sound more positive (happy, cheerful, euphoric), while tracks with low valence sound more negative (sad, depressed, angry)."
+
+```{r}
+joni_spotify %>% select(track_name, valence) %>% arrange(-valence)
+```
+The expectation is that the lyrics will match the valence. I expect that the 
+song "Shiny Toys" has positive lyrics to match the songs "Valence"
+
+Again I tokenize the lyrics and remove stop words. I also decided here to "stem"
+the words. Stemming is the process of reducing words to their base or root form. 
+For example, “sparkle” is reduced to “sparkl”. I will use these 
+stemmed words to prevent the unnecessary exclusion of words that don’t have a 
+match in sentiment dictionaries.
+
+```{r}
+joni_spotify_token <- joni_word_clean %>%
+  # As before
+  mutate_if(is.factor, ~ as.character(.)) %>%
+  unnest_tokens(output = word, input = lyrics_scraped, token = "words",
+                to_lower = TRUE, strip_punct = TRUE
+                ) %>%
+  anti_join(get_stopwords(source = "snowball"), by = "word") %>%
+  # This is new 
+  mutate(
+    stem = wordStem(word),
+    year = as.numeric(str_sub(album_release_date, 1, 4)),
+    album_name = paste0(album_name, " (", str_sub(album_release_date, 1, 4), ")")
+  )
+
+head(joni_spotify_token %>% select(word, stem))
+```
+
+Get sentiments
+
+```{r}
+# Get bing sentiments. Tidytext package includes dictionaries for other
+# sentiment dictionaries.
+bing <- get_sentiments("bing") %>%
+  mutate(stem = wordStem(word)) %>%
+  distinct(stem, sentiment)
+
+bing
+```
+
+```{r}
+p_joni_sentiment <- joni_spotify_token %>%
+  # Join with Bing dictionary
+  inner_join(bing) %>%
+  # Get counts
+  count(album_name, sentiment, year) %>%
+  # Get proportions
+  group_by(album_name, year) %>%
+  mutate(n_prop = n / sum(n)) %>%
+  ungroup() %>%
+  # Set up sentiment analysis so that it can all be plotted on the same plot
+  mutate(sentiment_n = if_else(sentiment == "negative", -n_prop, n_prop)) %>%
+  # Reorder albums by year
+  mutate(album_name = fct_reorder(album_name, year))
+
+p_joni_sentiment
+```
+Plot
+
+FYI, "There are two types of bar charts, determined by what is mapped to bar 
+height. By default, geom_bar uses stat="count" which makes the height of the bar 
+proportion to the number of cases in each group (or if the weight aesthetic is 
+supplied, the sum of the weights). If you want the heights of the bars to 
+represent values in the data, use stat="identity" and map a variable to the y 
+aesthetic."
+
+```{r}
+p_joni_sentiment %>%
+  # Fix sentiment to make it look nicer
+  mutate(sentiment = if_else(sentiment == "negative", "Negative", "Positive")) %>%
+  # Plot
+  ggplot(aes(album_name, sentiment_n, fill = sentiment)) +
+  # Geom bar here for this one with some light transparency
+  geom_bar(stat = "identity", alpha = 0.75) +
+  # Flip so albums are on the y axis
+  coord_flip() +
+  # Add labels
+  labs(
+    x = "",
+    y = "",
+    title = "Joni Mitchell album sentiment\nby stemmed words"
+  ) +
+  # Add base theme
+  theme_alex() +
+  # Make theme adjustments
+  theme(
+    legend.position = "bottom",
+    legend.text = element_text(size = 10, color = "#460069"),
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  # Select colors
+  scale_fill_manual(values = c("#BF406C", "#F1E678")) +
+  # Turn x axis into percents
+  scale_y_continuous(labels = scales::percent)
+```
+
+It looks like Joni’s albums tend to have a similar distribution of positive and 
+negative words. On average positive words make up around 55% of Joni albums and 
+negative words about 44%. We see 2 large exceptions though, 
+Ladies of the Canyon (1970) and Turbulent Indigo (1994).
+
+I was a little surprised to see Ladies of the Canyon (1970) as being so postie 
+but was not surprised to see Turbulent Indigo as the most negative.
+
+Here is the album cover
+```{r}
+magick::image_read("https://upload.wikimedia.org/wikipedia/en/3/37/Joni_Turbulent.jpg")
+```
+
+Sentiment analysis across Joni’s musical career --------------------------------
+
+Different views - not broken out by album and wordclouds
+
+```{r}
+joni_spotify_token %>%
+  # Join with Bing dictionary to get sentiments
+  inner_join(bing) %>%
+  # Get counts
+  count(stem, sentiment) %>%
+  # Get top 10
+  group_by(sentiment) %>%
+  top_n(10) %>%
+  ungroup() %>%
+  # Reorder factors
+  mutate(stem = fct_reorder(stem, n),
+         sentiment = if_else(sentiment == "negative", "Negative", "Positive")) %>%
+  # Plot
+  ggplot(aes(stem, n, fill = sentiment)) +
+  # Make a bar chart
+  geom_col(show.legend = TRUE, alpha = 0.75) +
+  # Facet by sentiment
+  facet_wrap(~sentiment, scales = "free") +
+  # Add labels
+  labs(
+    y = "Contribution to sentiment",
+    x = NULL,
+    title = "Most common positive and negative words across \nJoni Mitchell's career"
+  ) +
+  # Flip plot so words are on the y axis
+  coord_flip() +
+  # Add alex theme and customize a bit
+  theme_alex() +
+  theme(
+    legend.position = "bottom",
+    legend.text = element_text(size = 10, color = "#460069"),
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  # Pick new colors
+  scale_fill_manual(values = c("#BF406C", "#F1E678"))
+```
+
+
+```{r}
+joni_spotify_token %>%
+  # Join with bing dictionaries
+  inner_join(bing) %>%
+  # Get counts
+  count(word, sentiment, sort = TRUE) %>%
+  # Create wordcloud
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(
+    title.size = 3,
+    title.colors = c("indianred3","lightsteelblue3"),
+    title.bg.colors = c("#FFFFFF", "#FFFFFF"),
+    colors = c("indianred3","lightsteelblue3"),
+    max.words = 200
+  )
+```
+What pops out to me is how “like” is one of the top words. Joni was likely using 
+this to describe things, she was using analogies. This is one of the issues with 
+using single words in sentiment analysis. One loses the context that these words 
+are used in. 
+
+This is where it would make sense to use a sentiment analysis algorithm that 
+looks beyond unigrams to understand the sentiment of the sentence as a whole.
+
+To do that a shortcut: bing in Genius lyrics instead of scraped lyrics because 
+they conveniently have ordered and numbered sentences. Plus if I wanted to do 
+this analysis for some other artist I don't want to go and scrape their website
+for lyrics, this is just more convenient.
+
+```{r}
+joni_genius_df %>% select(track_title, line, lyric)
+```
+Use the sentmentr package to get sentiment by sentence. The sentiment_by() 
+function calculates text polarity sentiment at the sentence level.
+
+```{r}
+# Load sentimentr and magrittr
+pacman::p_load(sentimentr)
+
+# Get sentiment by sentence
+joni_sentence_df <- joni_genius_df %>%
+  # Get sentiment by sentence
+  mutate(joni_sentences = get_sentences(lyric)) %$%
+  sentiment_by(joni_sentences, list(album_name, track_title))
+
+head(joni_sentence_df)
+```
+
+Plot sentiment by sentence
+
+```{r}
+p1 <- joni_sentence_df %>%
+  mutate(
+    track_title = as.factor(track_title),
+    track_title = fct_reorder(track_title, ave_sentiment)
+  ) %>%
+  top_n(30) %>%
+  ggplot(aes(track_title, ave_sentiment)) +
+  geom_col(alpha = 0.75, fill = "#F1E678") +
+  coord_flip() +
+  theme_alex() +
+  labs(
+    x = NULL,
+    y = NULL,
+    title = "Most positive"
+  ) +
+  theme(
+    plot.title = element_text(size = 10)
+  )
+
+p1
+```
+
+```{r}
+p2 <- joni_sentence_df %>%
+  mutate(
+    track_title = as.factor(track_title),
+    track_title = fct_reorder(track_title, ave_sentiment)
+  ) %>%
+  top_n(-30) %>%
+  ggplot(aes(track_title, ave_sentiment)) +
+  geom_col(alpha = 0.75, fill = "#BF406C") +
+  coord_flip() +
+  theme_alex() +
+  labs(
+    x = NULL,
+    y = NULL,
+    title = "Most negative"
+  ) +
+  theme(
+    plot.title = element_text(size = 10)
+  )
+
+p2
+```
+
+```{r}
+library(patchwork)
+
+p1 + p2 +
+  plot_annotation(
+    title = "Joni Mitchell text polarity sentiment at the sentence level",
+    subtitle = "Top 30 most positive and negative songs",
+    caption = "source: Spotify, \nGenius",
+    theme = theme_alex()
+  ) &
+  theme(
+    plot.title = element_text(hjust = 0.5)
+  )
+```
+
+We're at a point now where we can compare the Spotify "valence" score to the 
+sentiment of the lyrics.
+
+```{r}
+joni_spotify_3 <- joni_spotify %>%
+  mutate(
+    track_name = tolower(
+      str_trim(str_remove(track_name, "\\s*\\([^\\)]+\\)\\s*$"))
+    ),
+    track_name = str_remove(track_name, " - live")
+  ) %>%
+  filter(
+    !album_name %in% c(
+      "Shadows and Light", "Travelogue", "Both Sides Now",
+      "Shine [Standard Jewel - Parts Order Only]"
+    ),
+    !track_name %in% c(
+      "Coin In The Pocket (Rap)", "Funeral (Rap)",
+      "Happy Birthday 1975 (Rap)", "I's A Muggin' (Rap)",
+      "Lucky (Rap)"
+    )
+  )
+```
+
+```{r}
+joni_val_sent <- joni_sentence_df %>%
+  transmute(
+    track_name = tolower(str_trim(str_remove(track_title, "\\s*\\([^\\)]+\\)\\s*$"), side = "both")),
+    track_name = str_remove(track_name, " - live"),
+    #album_name,
+    word_count,
+    sd,
+    ave_sentiment
+  ) %>%
+  full_join(joni_spotify_3) %>%
+  transmute(
+    track_name = paste0(track_name, " (", album_release_year, ")"),
+    album_name,
+    valence,
+    ave_sentiment
+  ) %>%
+  distinct()
+
+joni_val_sent
+```
+
+```{r}
+pacman::p_load(moderndive)
+
+joni_model <- joni_val_sent %>%
+  drop_na() %>%
+  lm(valence ~ ave_sentiment, data = .)
+
+joni_plot1 <- joni_val_sent %>%
+  distinct() %>%
+  ggplot(aes(ave_sentiment, valence)) +
+  geom_point(color = "#460069") +
+  geom_smooth(method = "lm", se = FALSE, linetype = "dashed", color = "#BF406C") +
+  theme_alex() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(hjust = 0.5),
+    axis.title = element_text(hjust = 1)
+  ) +
+  labs(
+    x = "Average song sentiment",
+    y = "Valence score",
+    title = "Relationship between valence and average song sentiment in \nJoni Mitchell song"
+  )
+
+joni_plot2 <- get_regression_points(joni_model) %>%
+  ggplot(aes(residual)) +
+  geom_histogram(
+    binwidth = 0.05, color = "white", alpha = 0.75,
+    fill = "#BF406C"
+  ) +
+  theme_alex() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.title = element_text(hjust = 1)
+  ) +
+  labs(
+    y = "Count",
+    x = "Residual",
+    title = "Normality of residuals"
+  )
+
+joni_plot1 / joni_plot2 /
+  get_regression_table(joni_model) %>%
+    as.data.frame() %>%
+    gridExtra::tableGrob(
+      rows = NULL
+    )
+```
