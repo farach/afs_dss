@@ -1,0 +1,154 @@
+---
+title: "Databases and modeling with R"
+author: "Alex Farach"
+date: "3/21/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(odbc)
+library(DBI)
+library(RMySQL)
+library(dbplyr)
+```
+
+# Create connection
+
+```{r}
+drv <- dbDriver("MySQL")
+
+con <- dbConnect(
+  drv,
+  user = 'admin',
+  password = 'mydbinstance',
+  dbname = 'mydb',
+  host = 'mydbinstance.c6c1szwymy7m.us-east-1.rds.amazonaws.com',
+  port = 3306
+)
+```
+
+## Create table for use in example
+
+```{r}
+DBI::dbListTables(con)
+```
+No tables. Let's create one and drop it in.
+
+The following table comes from the kaggle dataset: https://www.kaggle.com/ntnu-testimon/paysim1
+
+```{r}
+fraud <- data.table::fread("../FRTIB/fraud/example_data/fraud_example.csv")
+```
+
+```{r}
+dbWriteTable(con, "fraud_example", fraud)
+```
+
+## Let's get started
+
+What tables do we have in our data lake?
+```{r}
+dbListTables(con)
+```
+Looks like we only have 1 table "fraud_example". Let's look at the column names
+in this table.
+
+```{r}
+dbColumnInfo(con, "fraud_example")
+```
+
+Cool. We can also use these 2 commands to create a function that creates a table
+showing all of the tables and the columns within them.
+
+```{r}
+list_of_tables <- dbListTables(con)
+db_complete <- NULL
+
+for (i in list_of_tables) {
+  loop_db <- dbColumnInfo(con, "fraud_example") %>%
+    mutate(
+      table_name = "fraud_example"
+    )
+  
+  db_complete = bind_rows(db_complete, loop_db)
+}
+
+db_complete
+```
+
+# Multiple ways to get data
+
+You can write SQL and send/get results using `r DBI::dbGetQuery()`
+```{r}
+fraud_data <- dbGetQuery(con, "
+                         SELECT * 
+                         FROM fraud_example 
+                         ORDER BY RAND() 
+                         LIMIT 25000;")
+```
+
+Or use actual SQL and the RMarkdown sql engine
+```{sql connection = con, output.vars = "fraud_data"}
+SELECT * 
+FROM fraud_example 
+ORDER BY RAND() 
+LIMIT 25000;
+```
+
+Or avoid SQL all together and use `r dbplyr()` which converts `dplyr()` syntax 
+into `SQL`.
+```{r}
+# create tbl() of the table you need to query
+fraud <- tbl(con, "fraud_example")
+
+# write dplyr like you normally would. dbplyr does the rest
+fraud_data_summary <- fraud %>%
+  select(-row_names) %>%
+  group_by(isFraud, isFlaggedFraud, step) %>%
+  summarise(
+    n = n()
+  ) %>%
+  ungroup() %>%
+  # select show_query() to see the translation dbplyr is sending along
+  #show_query()
+  # select collect() to collect the results of the query and bring into R
+  collect()
+```
+
+We now have a dataset we can take a look at.
+
+```{r}
+fraud_data_summary %>%
+  group_by(isFraud, isFlaggedFraud) %>%
+  summarise(
+    n = n()
+  ) %>%
+  mutate(prop = scales::percent(prop.table(n), accuracy = 0.001))
+
+fraud_data_summary %>%
+  group_by(step) %>%
+  summarise(
+    n = sum(n)
+  ) %>%
+  mutate(prop = scales::percent(prop.table(n), accuracy = 0.001))
+
+fraud_data %>%
+  select(-row_names) %>%
+  group_by(isFraud) %>%
+  summarise(
+    n = n()
+  ) %>%
+  ungroup()
+
+fraud_data %>%
+  select(-row_names) %>%
+  count(isFraud) %>%
+  mutate(per_n = scales::percent(n/sum(n), accuracy = 0.01))
+```
+
+
