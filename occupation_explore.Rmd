@@ -1,0 +1,195 @@
+---
+title: "dss2"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(here)
+```
+
+
+# Data science social 2
+
+## import data
+```{r}
+oes <- read.csv("./oes_2019.csv") %>%
+  janitor::clean_names(.)
+
+glimpse(oes)
+```
+
+I want to find the data science related fields
+
+```{r}
+oes %>%
+  mutate(occ_title = tolower(occ_title)) %>%
+  filter(str_detect(occ_title, "data")) 
+```
+
+```{r}
+oes %>%
+  mutate(occ_title = tolower(occ_title)) %>%
+  filter(str_detect(occ_title, "data")) %>%
+  distinct(occ_title)
+```
+
+This looks promising. I'll start here. It might be worthwhile to come back at
+some point and look through all the different tech occupations.
+
+I'm going to filter by occupation code.
+```{r}
+oes %>%
+  filter(occ_code == "15-2098") %>%
+  select(occ_code, o_group, i_group, everything())
+```
+I see different levels of things like o_group and i_group. Also area and naics
+looks like it needs to be cleaned up. Area is the FIPS code and should be a factor
+2 characters long. Naics is all over the place. Sometimes its 6 digits long, sometimes
+2, sometimes it's hyphenated. I need to figure out how to clean that up if I want
+to use it.
+
+I didn't see this before but it looks like the expected numeric variables like 
+pct_total or a_mean are all character! What the heck? I'm pretty sure it's because
+of those asteriks and other special characters in there. We need to get rid of 
+those in order to set these variables as numeric an be able to use.
+
+Lots of cleanup...first things first though, let me figure out what NAICS should
+look like
+
+```{r}
+library(searcher)
+
+search_google("bls naics code structure", rlang = FALSE)
+```
+Actually I have another idea. There has to be a relationship between o_group, i_group
+and the structure of the naics code.
+```{r}
+oes %>%
+  filter(occ_code == "15-2098") %>%
+  mutate(naics_length = nchar(naics)) %>%
+  distinct(o_group, i_group, naics_length) %>%
+  arrange(desc(i_group), o_group)
+```
+Ok, what this tells me is that the occ code for data scientists (15-2098) can 
+exist in different o_groups and i_groups. I need to learn more about those to
+figure out what exactly I should be looking at.
+
+## industry code structure
+
+```{r}
+search_google("oes 'i_group'", rlang = FALSE) # that didn't help
+search_google("oes data structure", rlang = FALSE)
+```
+I see now. i_group tells us where in the heirarchy the occupation code is in. The 
+farther down the heirarchy, with the 6-digit level being the farthest down, the more
+specific the data is.
+
+```{r}
+search_google("oes detailed major total", rlang = FALSE)
+```
+Ok, now we're talking. The second link "Technical Notes for May 2019 OES Estimates"
+has a section for "The occupational coding system" and "The industry coding system", 
+presumably o_group and i_group. Best of all it has links to the specific pages
+where information about these groups can be found. 
+
+After some clicking I got here: https://www.bls.gov/soc/2018/soc_structure_2018.pdf.
+Perfect.
+
+The hyphen indicates a combo. So naics 31-33 means that the values presented are
+for 310000 and 330000 combined. That's kind of a headache to deal with :-/. How often
+does that happen?
+
+```{r}
+oes %>%
+  filter(str_detect(naics, "-"),
+         occ_code == "15-2098") %>%
+  distinct(naics)
+```
+
+2 times. I think we can handle this.
+
+## occupation code structure
+
+To get a sense of what the occupation group structure looks like we can do something
+like:
+
+```{r}
+oes %>%
+  filter(occ_code == "15-2098") %>%
+  mutate(
+    occ_code = str_remove_all(occ_code, "0"),
+    occ_code = str_remove_all(occ_code, "-"),
+    o_group_length = nchar(occ_code)
+    ) %>%
+  distinct(o_group, o_group_length)
+```
+
+Ok, cool. So the data science occupation code only exists at the 6 occupation code
+level. This means we don't have to worry about parsing through the other 2 categories:
+total and major.
+
+So now we know that the data scientist occupation of 15-2098 exists in different
+industries at different levels (sector, 3, 4, 5, 6 digit level) but only at the 
+6 digit occupation level. We can remove the o_group then so long as we always
+filter for the 15-2098.
+
+We still have to clean up some more but we're getting there.
+
+```{r}
+oes_clean_ds <- oes %>%
+  filter(occ_code == "15-2098") %>%
+  mutate_all(., ~ str_replace(., "\\**", ""),
+             ., ~ str_replace(., "~", "")) %>%
+  mutate(
+    fips = as.factor(str_pad(area, 2, "left", "0")),
+    naics = case_when(
+      naics == "31-33" ~ "310000",
+      naics == "44-45" ~ "440000",
+      TRUE ~ naics
+    ),
+    naics = as.factor(str_pad(naics, 6, "right", "0")),
+    area_title = as.factor(tolower(area_title)),
+    naics_title = tolower(naics_title),
+    occ_title = tolower(occ_title),
+    i_group_digit = if_else(i_group == "sector", "2", str_sub(i_group, 1, 1)),
+    across(c("tot_emp":"hourly"), as.numeric)
+  ) %>%
+  group_by(fips, area_title) %>%
+  mutate(max_detail = max(i_group_digit)) %>%
+  filter(i_group_digit == max_detail) %>%
+  select(fips, area_title, i_group, i_group_digit, max_detail, naics, naics_title, starts_with("a_")) %>%
+  arrange(fips, naics)
+
+oes_clean_ds
+```
+Time to plot!
+
+```{r}
+oes_clean_ds %>%
+  ungroup() %>%
+  mutate(naics_2 = as.factor(paste(area_title, naics_title, sep = ": ")),
+         naics_2 = str_to_title(naics_2),
+         naics_2 = fct_reorder(naics_2, a_mean)) %>%
+  ggplot(aes(x = naics_2, y = a_mean)) +
+  geom_segment(aes(x=naics_2, xend=naics_2, y=0, yend=a_mean), linetype = "dashed") +
+  geom_point( size = 4, color="orange", alpha = 0.6) +
+  coord_flip() +
+  ggthemes::theme_fivethirtyeight() +
+  labs(
+    title = "Data Scientists and Mathematical Science Occupations \nAverage Salary by State and Industry",
+    x = NULL,
+    y = NULL,
+    caption = "Source: BLS Occupational Employment Statistics \nhttps://www.bls.gov/oes/home.htm"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 1),
+    panel.grid.major.y = element_blank()
+  ) +
+  scale_y_continuous(labels = scales::dollar)
+
+```
