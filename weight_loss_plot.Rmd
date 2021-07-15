@@ -1,0 +1,410 @@
+---
+title: "Weight loss plot"
+author: "Alex Farach"
+date: "7/13/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(
+  cache = TRUE,
+  cache.lazy = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  dpi = 180,
+  fig.width = 9,
+  fig.height = 8,
+  fig.retina = 1,
+  echo = TRUE
+  )
+
+# Load packages
+pacman::p_load(tidyverse, ggforce, patchwork, ggtext, scico, ggimage)
+
+# Create a ggplot2 theme
+theme_alex <- function() {
+  font <- "TT Arial"
+  theme_minimal()
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(
+      color = "#cbcbcb",
+      linetype = "dashed"
+    ),
+    panel.grid.major.x = element_line(
+      color = "#cbcbcb",
+      linetype = "dashed"
+    ),
+    panel.background = element_blank(),
+    strip.background = element_rect(color = "white", size = 3),
+    strip.text = element_text(
+      hjust = 0,
+      color = "#460069",
+      size = 12
+    ),
+    axis.ticks = element_blank(),
+    plot.title = element_text(
+      family = font,
+      size = 20,
+      face = "bold",
+      color = "#460069",
+      hjust = 0.5
+    ),
+    plot.subtitle = element_text(
+      family = font,
+      size = 14,
+      color = "#6a1c91",
+      hjust = 0.5
+    ),
+    plot.caption = element_text(
+      family = font,
+      size = 9,
+      hjust = 1,
+      color = "#460069"
+    ),
+    axis.title = element_text(
+      family = font,
+      size = 10,
+      color = "#460069"
+    ),
+    axis.text = element_text(
+      family = font,
+      size = 9,
+      color = "#460069"
+    ),
+    axis.text.x = element_text(
+      margin = margin(5, b = 10)
+    ),
+    legend.text.align = 0,
+    legend.background = element_blank(),
+    legend.title = element_blank(),
+    legend.key = element_blank(),
+    legend.text = element_text(
+      family = font,
+      size = 18,
+      color = "#4B636E"
+    )
+  )
+}
+```
+
+Bring in data and format
+
+```{r}
+# Bring in weight data
+weight <- readxl::read_excel("./garmin/Weight.xlsx") %>%
+  janitor::clean_names() %>%
+  mutate(
+    date = as.Date(date, "%b %d, %Y"),
+    weight = as.numeric(str_trim(str_remove_all(weight, "lbs"), "both")),
+    change = as.numeric(str_trim(str_remove_all(change, "lbs"), "both"))
+  )
+
+# Create nutrition data
+macro <- data.frame(
+  date = as.Date(c("2020-05-23", "2020-06-27", "2020-07-25", "2020-10-31", "2020-11-14")),
+  train_p = c(180, 180, 180, 180, 180),
+  train_c = c(210, 270, 230, 330, 395),
+  train_f = c(45, 45, 45, 55, 65),
+  rest_p = c(180, 180, 180, 180, 180),
+  rest_c = c(75, 135, 95, 175, 240),
+  rest_f = c(65, 65, 65, 85, 95),
+  weight = c(177.1, 170, 167.5, 154.9, 156.7)
+) %>%
+  mutate(
+    # Compute calories
+    train_calories = (train_p*4) + (train_c*4) + (train_f * 9),
+    rest_calories = (rest_p*4) + (rest_c*4) + (rest_f * 9),
+    total_cal = round(((train_calories*4) + (rest_calories * 3))/7, 0),
+    # Get daily average calroies
+    p = round((train_p + rest_p)/2, 0),
+    c = round((train_c + rest_c)/2, 0),
+    f = round((train_f + rest_f)/2, 0)
+  )
+```
+
+# Prep for first plot - weight loss
+```{r}
+df1 <- weight %>%
+  # Only want to look at the period I was training with Andy
+  filter(date > "2020-04-01", date < "2020-11-20") %>%
+  # Create variables for easier joining
+  mutate(
+    period = case_when(
+      date < "2020-05-23" ~ "0",
+      date >= "2020-05-23" & date < "2020-06-27" ~ "1",
+      date >= "2020-06-27" & date < "2020-07-25" ~ "2",
+      date >= "2020-07-25" & date < "2020-10-31" ~ "3",
+      date >= "2020-10-31" & date < "2020-11-14" ~ "4",
+      TRUE ~ "5"
+    )
+  ) %>%
+  # Join the macro table to the filtered weight table
+  left_join(macro %>%
+    mutate(
+      period = case_when(
+        date < "2020-05-23" ~ "0",
+        date >= "2020-05-23" & date < "2020-06-27" ~ "1",
+        date >= "2020-06-27" & date < "2020-07-25" ~ "2",
+        date >= "2020-07-25" & date < "2020-10-31" ~ "3",
+        date >= "2020-10-31" & date < "2020-11-14" ~ "4",
+        TRUE ~ "5"
+      )
+    ) %>%
+    # rename and select
+    rename(period_weight = weight) %>%
+    select(-date),
+  by = "period"
+  )
+
+# Make new table with distinct values to remove repition in graphic
+df2 <- df1 %>%
+  group_by(total_cal, period_weight, period, p, f, c) %>%
+  summarise(date = min(date)) %>%
+  ungroup() %>%
+  # Remove period where I wasn't tracking anything due to shoulder injury
+  filter(!is.na(total_cal)) %>%
+  # Create variables for plotting - these will help me draw segment lines on the
+  # plot
+  mutate(
+    y_max = case_when(
+      period == "1" ~ 177.1,
+      period == "2" ~ 170,
+      period == "3" ~ 167.5,
+      period == "4" ~ 160,
+      TRUE ~ 162.7
+    ),
+    y_min = case_when(
+      period == "1" ~ 173,
+      period == "2" ~ 166,
+      period == "3" ~ 163.5,
+      period == "4" ~ 154.9,
+      TRUE ~ 156.7
+    ),
+    period_weight_pos = if_else(period %in% c("0", "1", "2", "3"), y_min - 5.5, y_max + 4.5)
+  )
+```
+
+# Create weight loss plot
+```{r}
+p <- df1 %>%
+  ggplot(
+    aes(date, weight)
+  ) +
+  # Add points to plot
+  geom_point(
+    aes(fill = period), color = "black", pch = 21,
+    alpha = 0.85
+  ) +
+  # Add straight lines to point to the times I adjusted my diet
+  geom_segment(
+    aes(x = date, xend = date, y = y_min, yend = y_max),
+    color = "red", alpha = 0.85, data = df2
+  ) +
+  # Initial nutrition setup
+  geom_text(
+    aes(
+      x = date, y = period_weight_pos,
+      label = paste0("Calories: ", scales::comma(total_cal), "\nProtein: ", p, 
+                     "\nFat: ", f, "\nCarbs: ", c, "\nInitial nutrition\nsettings")
+    ),
+    position = position_dodge(width = 0.9), size = 2.75,
+    color = "red", data = df2 %>% filter(date == "2020-05-23")
+  ) +
+  # First nutrition adjustment
+  geom_text(
+    aes(
+      x = date, y = period_weight_pos,
+      label = paste0("Cal: ", scales::comma(total_cal), "\nP: ", p, 
+                     "\nF: ", f, "\nC: ", c, "\nLosing weight too\nfast, nutrition\nadjustment")
+    ),
+    position = position_dodge(width = 0.9), size = 2.75,
+    color = "red", data = df2 %>% filter(date == "2020-06-28")
+  ) +
+  # Second nutrition adjustment
+  geom_text(
+    aes(
+      x = date, y = period_weight_pos,
+      label = paste0("Cal: ", scales::comma(total_cal), "\nP: ", p, 
+                     "\nF: ", f, "\nC: ", c, "\nLosing weight too\nslow, nutrition\nadjustment")
+    ),
+    position = position_dodge(width = 0.9), size = 2.75,
+    color = "red", data = df2 %>% filter(date == "2020-07-25")
+  ) +
+  # Diet over, returning to normal
+  geom_text(
+    aes(
+      x = date, y = period_weight_pos,
+      label = paste0("Cal: ", scales::comma(total_cal), "\nP: ", p, "\nF: ", f, "\nC: ", c)
+    ),
+    position = position_dodge(width = 0.9), size = 2.75,
+    color = "red", data = df2 %>% filter(!period %in% c("1", "2", "3"))
+  ) +
+  # Connect the different weight adjustment periods with straight lines
+  geom_line(
+    aes(date, period_weight),
+    color = "red", alpha = 0.5, data = df2
+  ) +
+  # Apply my theme
+  theme_alex() +
+  # Make some adjustments to the theme
+  theme(
+    axis.title = element_text(hjust = 0.5),
+    plot.title = element_text(hjust = 0, size = 12),
+    legend.position = "none"
+  ) +
+  # Add labels to the plot
+  labs(
+    x = NULL,
+    y = "Weight (lbs)",
+    title = "Weight loss over time",
+    color = NULL
+  ) +
+  # Format the X axis
+  scale_x_date(
+    date_breaks = "1 month", date_minor_breaks = "1 week", date_labels = "%b"
+  ) +
+  # Add some color to the points
+  scale_fill_manual(values = scico(6, palette = "batlow"))
+
+# Wrapping a plot in () allows you to assign it and display it at once.
+(p <- p +
+  # Explain the shoulder injury period
+  ggtext::geom_textbox(
+    data = tibble(x = as.Date("2020-09-15"), y = 177, label = "<span style='font-size:12pt;'>Shoulder Injury</span><br><br>From 08-22 through 09-19 I stopped tracking my training due to a shoulder injury that prevented me from working out. During this time I stopped tracking my diet as well but maintained a loose adherence to it."),
+    aes(x, y, label = label),
+    size = 3, family = "TT Arial",
+    fill = "white", box.color = "#460069",
+    width = unit(14, "lines")
+  ) +
+  coord_cartesian(clip = "off")
+)
+```
+
+# Create the side bar plot
+
+```{r}
+img2 <- here::here("img", "before_after.jpg")
+
+(i <- ggplot() +
+  # Add the before and after pic
+  geom_image(aes(x = 0, y = 2.1, image = img2), size = 0.75) +
+  # Add before label to before pic
+  geom_text(aes(x = -1.25, y = 4, label = "Before")) +
+  # Add after label to after pic
+  geom_text(aes(x = 1.25, y = 4, label = "After")) +
+  # Add summary of the plot
+  geom_text(aes(
+    x = 0, y = 9,
+    label = str_wrap("During the 2020 pandy I obtained the services of a personal trainer. I had always wanted to get in shape and figured it was a great time to do so. I wasn't out in the tempting sea of fast food restaraunt and bars. I was at home where I could focus and remove temptations. This was not easy but not terribly difficult either. Key findings from the experience were to give your body time to adapt before making changes, track as much as possible to make adjustments easier, and be consistent.", 40)
+  ),
+  vjust = 1
+  ) +
+  # Add the title and caption the the plot
+  labs(
+    title = "A data scientist goes\non a diet...",
+    caption = "Source: self-collected data\nPersonal Trainer: Andy Morgan, rippedbody.com\nGraphic: Alex Farach"
+  ) +
+  coord_fixed(expand = FALSE, clip = "off") +
+  # Adjust the size of the plot
+  xlim(-3.25, 3.25) +
+  ylim(0, 9) +
+  # Use the void theme to remove everything
+  theme_void() +
+  # Make some adjustments to the theme.
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    plot.title = element_text(
+      size = 20,
+      face = "bold",
+      color = "#460069",
+      hjust = 0.5,
+      margin = margin(0, 0, 30, 0)
+    ),
+    plot.caption = element_text(
+      hjust = 0.5, margin = margin(10, 0, 0, 0),
+      lineheight = 1.01, color = "#460069"
+    )
+  )
+)
+```
+
+# Prep body measurements plot
+
+```{r}
+bm <- readxl::read_excel("./garmin/body_measurements.xlsx") %>%
+  janitor::clean_names()
+
+bm <- bm %>%
+  filter(date > "2020-04-01", date < "2020-11-20") %>%
+  select(-weight) %>%
+  pivot_longer(cols = -date, names_to = "metric", values_to = "value") %>%
+  mutate(
+    metric = factor(metric, 
+                    levels = c("chest", "l_arm", "r_arm", "x2_above", "belly", 
+                               "x2_below", "hips", "l_thigh", "r_thigh"), 
+                    labels = c("Chest", "Left arm", "Right arm", '2" above belly',
+                               "Belly", '2" below belly', " Hips", "Left thigh",
+                               "Right thigh")
+                      ),
+    name_lab = if_else(date == as.Date("2020-08-15"), metric, NULL),
+    date = as.Date(date)
+  )
+```
+
+# Create body measurements plot
+
+```{r}
+(u <- bm %>%
+  ggplot(aes(date, value, color = metric, group = metric)) +
+  # Add points
+  geom_point(size = 1, alpha = 0.75) +
+  # Connect the dots
+  geom_line(size = 0.75, alpha = 0.75) +
+  # Apply my there
+  theme_alex() +
+  # Adjust theme
+  theme(
+    legend.position = "none",
+    plot.title = element_text(margin = margin(0, 0, 30, 0), hjust = 0, size = 12)
+  ) +
+  # Create labels in the plot so we can remove the legend. This is a much
+  # cleaner approach and since we have the room due to missing data for
+  # shoulder injury period, why not?
+  ggrepel::geom_text_repel(
+    aes(color = metric, label = name_lab),
+    fontface = "bold",
+    size = 4,
+    direction = "y",
+    xlim = as.Date(c("2020-08-22", NA)),
+    hjust = 0,
+    segment.size = .7,
+    segment.alpha = .5,
+    segment.linetype = "dotted",
+    box.padding = .4,
+    segment.curvature = -0.1,
+    segment.ncp = 3,
+    segment.angle = 20
+  ) +
+  # Adjust the color so it matches the weight loss plot
+  scale_color_manual(values = scico(9, palette = "batlow")) +
+  # Add some labels
+  labs(
+    title = "Body measurements over time",
+    x = NULL,
+    y = "Measurement (cm)"
+  ) +
+  # Point out the right arm muscle atrophy due to the shoulder injury
+  geom_mark_circle(aes(x = as.Date("2020-09-26"), y = 33.5, label = str_wrap("Right arm atrophy due to shoulder injury", 12), filter = metric == "Right arm"),
+    color = "black",
+    label.fontsize = 8, label.fill = NULL, label.buffer = unit(0, "mm"),
+    con.type = "none"
+  )
+)
+```
+
+# Put it all together
+```{r}
+i | p / u
+```
