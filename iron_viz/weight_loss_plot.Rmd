@@ -20,7 +20,7 @@ knitr::opts_chunk$set(
   )
 
 # Load packages
-pacman::p_load(tidyverse, ggforce, patchwork, ggtext, scico, ggimage)
+pacman::p_load(tidyverse, ggforce, patchwork, ggtext, scico, ggimage, here)
 
 # Create a ggplot2 theme
 theme_alex <- function() {
@@ -93,7 +93,7 @@ Bring in data and format
 
 ```{r}
 # Bring in weight data
-weight <- readxl::read_excel("./garmin/Weight.xlsx") %>%
+weight <- readxl::read_excel(here("garmin", "Weight.xlsx")) %>%
   janitor::clean_names() %>%
   mutate(
     date = as.Date(date, "%b %d, %Y"),
@@ -103,7 +103,10 @@ weight <- readxl::read_excel("./garmin/Weight.xlsx") %>%
 
 # Create nutrition data
 macro <- data.frame(
-  date = as.Date(c("2020-05-23", "2020-06-27", "2020-07-25", "2020-10-31", "2020-11-14")),
+  date = as.Date(c(
+    "2020-05-23", "2020-06-27", "2020-07-25", "2020-10-31",
+    "2020-11-14"
+  )),
   train_p = c(180, 180, 180, 180, 180),
   train_c = c(210, 270, 230, 330, 395),
   train_f = c(45, 45, 45, 55, 65),
@@ -114,13 +117,13 @@ macro <- data.frame(
 ) %>%
   mutate(
     # Compute calories
-    train_calories = (train_p*4) + (train_c*4) + (train_f * 9),
-    rest_calories = (rest_p*4) + (rest_c*4) + (rest_f * 9),
-    total_cal = round(((train_calories*4) + (rest_calories * 3))/7, 0),
-    # Get daily average calroies
-    p = round((train_p + rest_p)/2, 0),
-    c = round((train_c + rest_c)/2, 0),
-    f = round((train_f + rest_f)/2, 0)
+    train_calories = (train_p * 4) + (train_c * 4) + (train_f * 9),
+    rest_calories = (rest_p * 4) + (rest_c * 4) + (rest_f * 9),
+    total_cal = round(((train_calories * 4) + (rest_calories * 3)) / 7, 0),
+    # Get daily average calories
+    p = round((train_p + rest_p) / 2, 0),
+    c = round((train_c + rest_c) / 2, 0),
+    f = round((train_f + rest_f) / 2, 0)
   )
 ```
 
@@ -158,7 +161,7 @@ df1 <- weight %>%
   by = "period"
   )
 
-# Make new table with distinct values to remove repition in graphic
+# Make new table with distinct values to remove repetition in graphic
 df2 <- df1 %>%
   group_by(total_cal, period_weight, period, p, f, c) %>%
   summarise(date = min(date)) %>%
@@ -182,7 +185,9 @@ df2 <- df1 %>%
       period == "4" ~ 154.9,
       TRUE ~ 156.7
     ),
-    period_weight_pos = if_else(period %in% c("0", "1", "2", "3"), y_min - 5.5, y_max + 4.5)
+    period_weight_pos = if_else(period %in% c("0", "1", "2", "3"), y_min - 5.5,
+      y_max + 4.5
+    )
   )
 ```
 
@@ -194,7 +199,8 @@ p <- df1 %>%
   ) +
   # Add points to plot
   geom_point(
-    aes(fill = period), color = "black", pch = 21,
+    aes(fill = period),
+    color = "black", pch = 21,
     alpha = 0.85
   ) +
   # Add straight lines to point to the times I adjusted my diet
@@ -206,8 +212,11 @@ p <- df1 %>%
   geom_text(
     aes(
       x = date, y = period_weight_pos,
-      label = paste0("Calories: ", scales::comma(total_cal), "\nProtein: ", p, 
-                     "\nFat: ", f, "\nCarbs: ", c, "\nInitial nutrition\nsettings")
+      label = paste0(
+        "Calories: ", scales::comma(total_cal), "\nProtein: ", p,
+        "\nFat: ", f, "\nCarbs: ", c,
+        "\nInitial nutrition\nsettings"
+      )
     ),
     position = position_dodge(width = 0.9), size = 2.75,
     color = "red", data = df2 %>% filter(date == "2020-05-23")
@@ -216,8 +225,11 @@ p <- df1 %>%
   geom_text(
     aes(
       x = date, y = period_weight_pos,
-      label = paste0("Cal: ", scales::comma(total_cal), "\nP: ", p, 
-                     "\nF: ", f, "\nC: ", c, "\nLosing weight too\nfast, nutrition\nadjustment")
+      label = paste0(
+        "Cal: ", scales::comma(total_cal), "\nP: ", p,
+        "\nF: ", f, "\nC: ", c, "\nLosing weight too\nfast, 
+                     nutrition\nadjustment"
+      )
     ),
     position = position_dodge(width = 0.9), size = 2.75,
     color = "red", data = df2 %>% filter(date == "2020-06-28")
@@ -226,8 +238,11 @@ p <- df1 %>%
   geom_text(
     aes(
       x = date, y = period_weight_pos,
-      label = paste0("Cal: ", scales::comma(total_cal), "\nP: ", p, 
-                     "\nF: ", f, "\nC: ", c, "\nLosing weight too\nslow, nutrition\nadjustment")
+      label = paste0(
+        "Cal: ", scales::comma(total_cal), "\nP: ", p,
+        "\nF: ", f, "\nC: ", c, "\nLosing weight too\nslow, 
+                     nutrition\nadjustment"
+      )
     ),
     position = position_dodge(width = 0.9), size = 2.75,
     color = "red", data = df2 %>% filter(date == "2020-07-25")
@@ -236,7 +251,10 @@ p <- df1 %>%
   geom_text(
     aes(
       x = date, y = period_weight_pos,
-      label = paste0("Cal: ", scales::comma(total_cal), "\nP: ", p, "\nF: ", f, "\nC: ", c)
+      label = paste0(
+        "Cal: ", scales::comma(total_cal), "\nP: ", p, "\nF: ", f,
+        "\nC: ", c
+      )
     ),
     position = position_dodge(width = 0.9), size = 2.75,
     color = "red", data = df2 %>% filter(!period %in% c("1", "2", "3"))
@@ -285,7 +303,7 @@ p <- df1 %>%
 # Create the side bar plot
 
 ```{r}
-img2 <- here::here("img", "before_after.jpg")
+img2 <- here("img", "before_after.jpg")
 
 (i <- ggplot() +
   # Add the before and after pic
@@ -333,7 +351,7 @@ img2 <- here::here("img", "before_after.jpg")
 # Prep body measurements plot
 
 ```{r}
-bm <- readxl::read_excel("./garmin/body_measurements.xlsx") %>%
+bm <- readxl::read_excel(here("garmin", "body_measurements.xlsx")) %>%
   janitor::clean_names()
 
 bm <- bm %>%
@@ -341,13 +359,17 @@ bm <- bm %>%
   select(-weight) %>%
   pivot_longer(cols = -date, names_to = "metric", values_to = "value") %>%
   mutate(
-    metric = factor(metric, 
-                    levels = c("chest", "l_arm", "r_arm", "x2_above", "belly", 
-                               "x2_below", "hips", "l_thigh", "r_thigh"), 
-                    labels = c("Chest", "Left arm", "Right arm", '2" above belly',
-                               "Belly", '2" below belly', " Hips", "Left thigh",
-                               "Right thigh")
-                      ),
+    metric = factor(metric,
+      levels = c(
+        "chest", "l_arm", "r_arm", "x2_above", "belly",
+        "x2_below", "hips", "l_thigh", "r_thigh"
+      ),
+      labels = c(
+        "Chest", "Left arm", "Right arm", '2" above belly',
+        "Belly", '2" below belly', " Hips", "Left thigh",
+        "Right thigh"
+      )
+    ),
     name_lab = if_else(date == as.Date("2020-08-15"), metric, NULL),
     date = as.Date(date)
   )
@@ -367,7 +389,10 @@ bm <- bm %>%
   # Adjust theme
   theme(
     legend.position = "none",
-    plot.title = element_text(margin = margin(0, 0, 30, 0), hjust = 0, size = 12)
+    plot.title = element_text(
+      margin = margin(0, 0, 30, 0), hjust = 0,
+      size = 12
+    )
   ) +
   # Create labels in the plot so we can remove the legend. This is a much
   # cleaner approach and since we have the room due to missing data for
@@ -396,10 +421,14 @@ bm <- bm %>%
     y = "Measurement (cm)"
   ) +
   # Point out the right arm muscle atrophy due to the shoulder injury
-  geom_mark_circle(aes(x = as.Date("2020-09-26"), y = 33.5, label = str_wrap("Right arm atrophy due to shoulder injury", 12), filter = metric == "Right arm"),
-    color = "black",
-    label.fontsize = 8, label.fill = NULL, label.buffer = unit(0, "mm"),
-    con.type = "none"
+  geom_mark_circle(aes(
+    x = as.Date("2020-09-26"), y = 33.5,
+    label = str_wrap("Right arm atrophy due to shoulder injury", 12), 
+    filter = metric == "Right arm"
+  ),
+  color = "black",
+  label.fontsize = 8, label.fill = NULL, label.buffer = unit(0, "mm"),
+  con.type = "none"
   )
 )
 ```
