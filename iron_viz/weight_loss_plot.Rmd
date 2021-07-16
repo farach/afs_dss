@@ -24,7 +24,7 @@ pacman::p_load(tidyverse, ggforce, patchwork, ggtext, scico, ggimage, here)
 
 # Create a ggplot2 theme
 theme_alex <- function() {
-  font <- "TT Arial"
+  font <- "Cooper Black"
   theme_minimal()
   theme(
     panel.grid.minor = element_blank(),
@@ -199,23 +199,23 @@ p <- df1 %>%
   ) +
   # Add points to plot
   geom_point(
-    aes(fill = period),
-    color = "black", pch = 21,
-    alpha = 0.85
+    aes(fill = period), color = "black", pch = 21, alpha = 0.85
   ) +
   # Add straight lines to point to the times I adjusted my diet
   geom_segment(
-    aes(x = date, xend = date, y = y_min, yend = y_max),
-    color = "red", alpha = 0.85, data = df2
+    aes(x = date, xend = date, y = y_min, yend = y_max), color = "red", 
+    alpha = 0.85, data = df2
   ) +
+  # Add annotation
+  annotate("text", x = as.Date("2020-06-19"), y = 179, 
+           label = "Goal is -1 lbs per week", family = "Cooper Black", 
+           color = "#460069") +
   # Initial nutrition setup
   geom_text(
     aes(
       x = date, y = period_weight_pos,
       label = paste0(
-        "Calories: ", scales::comma(total_cal), "\nProtein: ", p,
-        "\nFat: ", f, "\nCarbs: ", c,
-        "\nInitial nutrition\nsettings"
+        "Calories: ", scales::comma(total_cal), "\nProtein: ", p, "\nFat: ", f, "\nCarbs: ", c, "\nInitial nutrition\nsettings"
       )
     ),
     position = position_dodge(width = 0.9), size = 2.75,
@@ -227,8 +227,7 @@ p <- df1 %>%
       x = date, y = period_weight_pos,
       label = paste0(
         "Cal: ", scales::comma(total_cal), "\nP: ", p,
-        "\nF: ", f, "\nC: ", c, "\nLosing weight too\nfast, 
-                     nutrition\nadjustment"
+        "\nF: ", f, "\nC: ", c, "\nLosing weight too\nfast, nutrition\nadjustment"
       )
     ),
     position = position_dodge(width = 0.9), size = 2.75,
@@ -240,8 +239,7 @@ p <- df1 %>%
       x = date, y = period_weight_pos,
       label = paste0(
         "Cal: ", scales::comma(total_cal), "\nP: ", p,
-        "\nF: ", f, "\nC: ", c, "\nLosing weight too\nslow, 
-                     nutrition\nadjustment"
+        "\nF: ", f, "\nC: ", c, "\nLosing weight too\nslow, nutrition\nadjustment"
       )
     ),
     position = position_dodge(width = 0.9), size = 2.75,
@@ -252,8 +250,7 @@ p <- df1 %>%
     aes(
       x = date, y = period_weight_pos,
       label = paste0(
-        "Cal: ", scales::comma(total_cal), "\nP: ", p, "\nF: ", f,
-        "\nC: ", c
+        "Cal: ", scales::comma(total_cal), "\nP: ", p, "\nF: ", f, "\nC: ", c
       )
     ),
     position = position_dodge(width = 0.9), size = 2.75,
@@ -268,7 +265,7 @@ p <- df1 %>%
   theme_alex() +
   # Make some adjustments to the theme
   theme(
-    axis.title = element_text(hjust = 0.5),
+    axis.title = element_text(hjust = 1),
     plot.title = element_text(hjust = 0, size = 12),
     legend.position = "none"
   ) +
@@ -290,7 +287,7 @@ p <- df1 %>%
 (p <- p +
   # Explain the shoulder injury period
   ggtext::geom_textbox(
-    data = tibble(x = as.Date("2020-09-15"), y = 177, label = "<span style='font-size:12pt;'>Shoulder Injury</span><br><br>From 08-22 through 09-19 I stopped tracking my training due to a shoulder injury that prevented me from working out. During this time I stopped tracking my diet as well but maintained a loose adherence to it."),
+    data = tibble(x = as.Date("2020-09-15"), y = 174.75, label = "<span style='font-size:12pt;><i style='color:#460069';>Shoulder Injury</i></span><br><br>From 08-22 through 09-19 I stopped tracking my training due to a shoulder injury that prevented me from working out. During this time I stopped tracking my diet as well but maintained a loose adherence to it."),
     aes(x, y, label = label),
     size = 3, family = "TT Arial",
     fill = "white", box.color = "#460069",
@@ -309,13 +306,21 @@ img2 <- here("img", "before_after.jpg")
   # Add the before and after pic
   geom_image(aes(x = 0, y = 2.1, image = img2), size = 0.75) +
   # Add before label to before pic
-  geom_text(aes(x = -1.25, y = 4, label = "Before")) +
+  geom_text(aes(x = -1.25, y = 4, label = "Before", family = "Cooper Black"),
+            colour = "#460069") +
   # Add after label to after pic
-  geom_text(aes(x = 1.25, y = 4, label = "After")) +
+  geom_text(aes(x = 1.25, y = 4, label = "After", family = "Cooper Black"),
+            colour = "#460069") +
   # Add summary of the plot
   geom_text(aes(
     x = 0, y = 9,
-    label = str_wrap("During the 2020 pandy I obtained the services of a personal trainer. I had always wanted to get in shape and figured it was a great time to do so. I wasn't out in the tempting sea of fast food restaraunt and bars. I was at home where I could focus and remove temptations. This was not easy but not terribly difficult either. Key findings from the experience were to give your body time to adapt before making changes, track as much as possible to make adjustments easier, and be consistent.", 40)
+    label = str_wrap("During the 2020 pandemic I obtained the services of a personal trainer. I had always wanted to get in shape and figured it was a great time to do so. I wasn't out in the tempting sea of fast food restaraunt and bars. I was at home where I could focus and remove temptations. This was not easy but not terribly difficult either. Key findings from the experience were to give your body time to adapt before making changes, track as much as possible to make adjustments easier, and be consistent.", 40)
+  ),
+  vjust = 1
+  ) +
+  geom_text(aes(
+    x = 0, y = 5,
+    label = str_wrap("One last thing, stay hopeful and focused. Don't let a setback keep you down. You can accomplish great things.", 40)
   ),
   vjust = 1
   ) +
@@ -334,6 +339,7 @@ img2 <- here("img", "before_after.jpg")
   theme(
     plot.background = element_rect(fill = "white", color = NA),
     plot.title = element_text(
+      family = "Cooper Black",
       size = 20,
       face = "bold",
       color = "#460069",
@@ -342,7 +348,8 @@ img2 <- here("img", "before_after.jpg")
     ),
     plot.caption = element_text(
       hjust = 0.5, margin = margin(10, 0, 0, 0),
-      lineheight = 1.01, color = "#460069"
+      lineheight = 1.01, color = "#460069",
+      family = "Cooper Black"
     )
   )
 )
@@ -392,7 +399,8 @@ bm <- bm %>%
     plot.title = element_text(
       margin = margin(0, 0, 30, 0), hjust = 0,
       size = 12
-    )
+    ),
+    axis.title = element_text(hjust = 1)
   ) +
   # Create labels in the plot so we can remove the legend. This is a much
   # cleaner approach and since we have the room due to missing data for
@@ -400,6 +408,7 @@ bm <- bm %>%
   ggrepel::geom_text_repel(
     aes(color = metric, label = name_lab),
     fontface = "bold",
+    #family = "Cooper Black",
     size = 4,
     direction = "y",
     xlim = as.Date(c("2020-08-22", NA)),
@@ -437,3 +446,8 @@ bm <- bm %>%
 ```{r}
 i | p / u
 ```
+
+
+
+
+
