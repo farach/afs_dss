@@ -304,12 +304,12 @@ img2 <- here("img", "before_after.jpg")
 
 (i <- ggplot() +
   # Add the before and after pic
-  geom_image(aes(x = 0, y = 2.1, image = img2), size = 0.75) +
+  geom_image(aes(x = 0, y = 1.85, image = img2), size = 0.75) +
   # Add before label to before pic
-  geom_text(aes(x = -1.25, y = 4, label = "Before", family = "Cooper Black"),
+  geom_text(aes(x = -1.25, y = 3.5, label = "Before", family = "Cooper Black"),
             colour = "#460069") +
   # Add after label to after pic
-  geom_text(aes(x = 1.25, y = 4, label = "After", family = "Cooper Black"),
+  geom_text(aes(x = 1.25, y = 3.5, label = "After", family = "Cooper Black"),
             colour = "#460069") +
   # Add summary of the plot
   geom_text(aes(
